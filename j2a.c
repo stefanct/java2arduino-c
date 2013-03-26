@@ -138,7 +138,7 @@ static uint8_t readByte(struct j2a_handle *comm, uint8_t *val) {
 }
 
 void j2a_packet_print(const struct j2a_packet *p) {
-	printf("p->cmd=%d, p->len=%d, p->msg=%p\n", p->cmd, p->len, p->msg);
+	printf("p->cmd=%d, p->len=%d\n", p->cmd, p->len);
 	printf("cmd=%d (0x%02x), ", p->cmd, p->cmd);
 	if(p->len > 0) {
 		printf("\n");
@@ -299,7 +299,7 @@ void j2a_print_funcmap(struct j2a_handle *comm, FILE *stream) {
 }
 
 static uint8_t get_funcidx(struct j2a_handle *comm, const char *name) {
-	if (j2a_fetch_funcmap(comm) != 0)
+	if (j2a_fetch_funcmap(comm) != 0 || name == NULL)
 		return UINT8_MAX;
 
 	for (size_t i = 0; i < comm->funccnt; i++) {
