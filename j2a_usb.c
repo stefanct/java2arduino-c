@@ -55,7 +55,12 @@ out:
 }
 
 uint8_t j2a_usb_init(void) {
-	return (libusb_init(NULL) != 0) ? 1 : 0;
+	int ret = libusb_init(NULL);
+	if (ret != 0) {
+		fprintf(stderr, "Initializing libusb failed: %s\n", libusb_error_name(ret));
+		return 1;
+	} else
+		return 0;
 }
 
 void *j2a_usb_connect(const char *ignored) {
@@ -84,12 +89,16 @@ void *j2a_usb_connect(const char *ignored) {
 	}
 	libusb_device_handle *handle;
 	ret = libusb_open(found, &handle);
-	if (ret != 0)
+	if (ret != 0) {
+		fprintf(stderr, "open failed: %s\n", libusb_error_name(ret));
 		goto out;
+	}
 
 	ret = libusb_claim_interface(handle, 0);
-	if (ret != 0)
+	if (ret != 0) {
+		fprintf(stderr, "claim failed: %s\n", libusb_error_name(ret));
 		goto out;
+	}
 
 out:
 	libusb_free_device_list(list, 1);
