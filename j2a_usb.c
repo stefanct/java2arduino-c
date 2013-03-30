@@ -4,12 +4,6 @@
 #include "libusb-1.0/libusb.h"
 #include "j2a_usb.h"
 
-static const uint8_t USB_IF_CLASS = 0xFF;
-static const uint8_t USB_IF_SUBCLASS = 0x12;
-static const uint8_t USB_IF_PROTOCOL = 0xEF;
-static const uint8_t USB_IN_EPNUM = 0x80 | 1;
-static const uint8_t USB_OUT_EPNUM = 2;
-
 static bool containsUsbEndpoint(const struct libusb_interface_descriptor *if_desc, uint8_t addr) {
 	for (int i = 0; i < if_desc->bNumEndpoints; i++) {
 		if (if_desc->endpoint[i].bEndpointAddress == addr)
@@ -33,16 +27,16 @@ static bool isArduino(libusb_device *dev) {
 		return false;
 
 	bool found = false;
-	for (int i=0; i < cfg_desc->bNumInterfaces; i++) {
+	for (int i = 0; i < cfg_desc->bNumInterfaces; i++) {
 		const struct libusb_interface *intf = cfg_desc->interface;
-		for (int j=0; j < intf->num_altsetting; j++) {
+		for (int j = 0; j < intf->num_altsetting; j++) {
 			const struct libusb_interface_descriptor *if_desc = intf->altsetting;
-			if (if_desc->bInterfaceClass != USB_IF_CLASS
-				|| if_desc->bInterfaceSubClass != USB_IF_SUBCLASS
-				|| if_desc->bInterfaceProtocol != USB_IF_PROTOCOL)
+			if (if_desc->bInterfaceClass != A2J_USB_IF_CLASS
+				|| if_desc->bInterfaceSubClass != A2J_USB_IF_SUBCLASS
+				|| if_desc->bInterfaceProtocol != A2J_USB_IF_PROTOCOL)
 				continue;
-			if (!containsUsbEndpoint(if_desc, USB_IN_EPNUM)
-				|| !containsUsbEndpoint(if_desc, USB_OUT_EPNUM))
+			if (!containsUsbEndpoint(if_desc, A2J_USB_IN_ADDR)
+				|| !containsUsbEndpoint(if_desc, A2J_USB_OUT_ADDR))
 				continue;
 			found = true;
 			goto out;
@@ -127,7 +121,7 @@ uint8_t j2a_usb_write(struct j2a_handle *comm, uint8_t val) {
 
 uint8_t j2a_usb_flush(struct j2a_handle *comm) {
 	int transferred;
-	int ret = libusb_bulk_transfer(comm->ctx, USB_OUT_EPNUM, comm->buf, comm->idx, &transferred, A2J_TIMEOUT * comm->len);
+	int ret = libusb_bulk_transfer(comm->ctx, A2J_USB_OUT_ADDR, comm->buf, comm->idx, &transferred, A2J_TIMEOUT * comm->len);
 	if ((ret == 0 || ret == LIBUSB_ERROR_TIMEOUT) && transferred == comm->idx) {
 		return 0;
 	} else
@@ -137,7 +131,7 @@ uint8_t j2a_usb_flush(struct j2a_handle *comm) {
 uint8_t j2a_usb_read(struct j2a_handle *comm, uint8_t *val) {
 	if (comm->idx >= comm->cnt) {
 		int transferred;
-		int ret = libusb_bulk_transfer(comm->ctx, USB_IN_EPNUM, comm->buf, comm->len, &transferred, A2J_TIMEOUT * comm->len);
+		int ret = libusb_bulk_transfer(comm->ctx, A2J_USB_IN_ADDR, comm->buf, comm->len, &transferred, A2J_TIMEOUT * comm->len);
 		if ((ret != 0 && ret != LIBUSB_ERROR_TIMEOUT) || transferred == 0)
 			return 1;
 
