@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -54,9 +55,15 @@ uint8_t j2a_usb_init(void) {
 		return 0;
 }
 
-void *j2a_usb_connect(const char *ignored) {
-	int ret;
+void *j2a_usb_connect(const char *nth_dev) {
+	int nth = 0;
+	if (nth_dev != NULL) {
+		nth = strtol(nth_dev, NULL, 10);
+		if (nth < 0)
+			return NULL;
+	}
 
+	int ret;
 	libusb_device **list;
 	libusb_device *found = NULL;
 	ssize_t cnt = libusb_get_device_list(NULL, &list);
@@ -68,9 +75,10 @@ void *j2a_usb_connect(const char *ignored) {
 	for (ssize_t i = 0; i < cnt; i++) {
 		libusb_device *dev = list[i];
 		if (isArduino(dev)) {
-			//libusb_get_max_packet_size
-			found = dev;
-			break;
+			if (nth-- == 0) {
+				found = dev;
+				break;
+			}
 		}
 	}
 
