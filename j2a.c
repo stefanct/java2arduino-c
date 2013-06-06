@@ -220,7 +220,7 @@ uint8_t j2a_fetch_props(struct j2a_handle *comm) {
 	return 0;
 }
 
-const char * const j2a_get_prop(struct j2a_handle *comm, const char *name) {
+char *j2a_get_prop(struct j2a_handle *comm, const char *name) {
 	if (j2a_fetch_props(comm) != 0)
 		return NULL;
 	for (size_t i = 0; i < comm->propcnt; i++) {

@@ -2,6 +2,7 @@
 #define J2A_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include "j2a_const.h"
 
 typedef struct j2a_packet {
@@ -39,7 +40,7 @@ struct j2a_handle *j2a_connect(const char *dev);
 void j2a_disconnect(struct j2a_handle *comm);
 void j2a_shutdown(void);
 uint8_t j2a_fetch_props(struct j2a_handle *comm);
-const char * const j2a_get_prop(struct j2a_handle *comm, const char *name);
+char *j2a_get_prop(struct j2a_handle *comm, const char *name);
 void j2a_print_propmap(struct j2a_handle *comm, FILE *stream);
 uint8_t j2a_fetch_funcmap(struct j2a_handle *comm);
 void j2a_print_funcmap(struct j2a_handle *comm, FILE *stream);

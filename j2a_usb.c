@@ -18,9 +18,6 @@ static bool isArduino(libusb_device *dev) {
 	if (ret != 0)
 		return false;
 
-	if (dev_desc.bDeviceClass != 0xff)
-		return false;
-
 	struct libusb_config_descriptor *cfg_desc;
 	ret = libusb_get_active_config_descriptor(dev, &cfg_desc);
 	if (ret != 0)
@@ -122,7 +119,7 @@ uint8_t j2a_usb_write(struct j2a_handle *comm, uint8_t val) {
 uint8_t j2a_usb_flush(struct j2a_handle *comm) {
 	int transferred;
 	int ret = libusb_bulk_transfer(comm->ctx, A2J_USB_OUT_ADDR, comm->buf, comm->idx, &transferred, A2J_TIMEOUT * comm->len);
-	if ((ret == 0 || ret == LIBUSB_ERROR_TIMEOUT) && transferred == comm->idx) {
+	if ((ret == 0 || ret == LIBUSB_ERROR_TIMEOUT) && transferred == (int)comm->idx) {
 		return 0;
 	} else
 		return 1;
