@@ -28,24 +28,24 @@ typedef struct j2a_handle {
 typedef struct j2a_kind {
 	uint8_t (*init)(void);
 	void *(*connect)(const char *dev);
-	void (*disconnect)(struct j2a_handle *comm);
+	void (*disconnect)(j2a_handle *comm);
 	void (*shutdown)(void);
-	uint8_t (*read)(struct j2a_handle *comm, uint8_t *val);
-	uint8_t (*write)(struct j2a_handle *comm, uint8_t val);
-	uint8_t (*flush)(struct j2a_handle *comm);
+	uint8_t (*read)(j2a_handle *comm, uint8_t *val);
+	uint8_t (*write)(j2a_handle *comm, uint8_t val);
+	uint8_t (*flush)(j2a_handle *comm);
 } j2a_kind;
 
 uint8_t j2a_init(void);
-struct j2a_handle *j2a_connect(const char *dev);
-void j2a_disconnect(struct j2a_handle *comm);
+j2a_handle *j2a_connect(const char *dev);
+void j2a_disconnect(j2a_handle *comm);
 void j2a_shutdown(void);
-uint8_t j2a_fetch_props(struct j2a_handle *comm);
-char *j2a_get_prop(struct j2a_handle *comm, const char *name);
-void j2a_print_propmap(struct j2a_handle *comm, FILE *stream);
-uint8_t j2a_fetch_funcmap(struct j2a_handle *comm);
-void j2a_print_funcmap(struct j2a_handle *comm, FILE *stream);
-uint8_t j2a_send(struct j2a_handle *comm, struct j2a_packet *p);
-uint8_t j2a_send_by_name(struct j2a_handle *comm, struct j2a_packet *p, const char *funcName);
-void j2a_packet_print(const struct j2a_packet *p);
+uint8_t j2a_fetch_props(j2a_handle *comm);
+char *j2a_get_prop(j2a_handle *comm, const char *name);
+void j2a_print_propmap(j2a_handle *comm, FILE *stream);
+uint8_t j2a_fetch_funcmap(j2a_handle *comm);
+void j2a_print_funcmap(j2a_handle *comm, FILE *stream);
+uint8_t j2a_send(j2a_handle *comm, j2a_packet *p);
+uint8_t j2a_send_by_name(j2a_handle *comm, j2a_packet *p, const char *funcName);
+void j2a_print_packet(const j2a_packet *p);
 
 #endif // J2A_H

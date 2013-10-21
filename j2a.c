@@ -8,7 +8,7 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-struct j2a_kind kinds[] = {
+j2a_kind kinds[] = {
 	{
 		.init = j2a_usb_init,
 		.connect = j2a_usb_connect,
@@ -30,13 +30,13 @@ static void free_map(char **map, uint8_t len) {
 	}
 }
 
-static void free_propmap(struct j2a_handle *comm) {
+static void free_propmap(j2a_handle *comm) {
 	free_map(comm->propmap, comm->propcnt*2);
 	comm->propmap = NULL;
 	comm->propcnt = 0;
 }
 
-static void free_funcmap(struct j2a_handle *comm) {
+static void free_funcmap(j2a_handle *comm) {
 	free_map(comm->funcmap, comm->funccnt);
 	comm->funcmap = NULL;
 	comm->funccnt = 0;
@@ -61,12 +61,12 @@ void j2a_shutdown(void) {
 	}
 }
 
-struct j2a_handle *j2a_connect(const char *dev) {
+j2a_handle *j2a_connect(const char *dev) {
 	unsigned int num_comms = ARRAY_SIZE(kinds);
 	for (unsigned int i = 0; i < num_comms; i++) {
 		void *ctx = kinds[i].connect(dev);
 		if (ctx != NULL) {
-			struct j2a_handle *comm = malloc(sizeof(struct j2a_handle));
+			j2a_handle *comm = malloc(sizeof(j2a_handle));
 			if (comm == NULL) {
 				kinds[i].disconnect(comm);
 				return NULL;
@@ -94,7 +94,7 @@ struct j2a_handle *j2a_connect(const char *dev) {
 	return NULL;
 }
 
-void j2a_disconnect(struct j2a_handle *comm) {
+void j2a_disconnect(j2a_handle *comm) {
 	if (comm != NULL) {
 		if (comm->kind != NULL) {
 			if (comm->kind->disconnect != NULL)
@@ -110,7 +110,7 @@ void j2a_disconnect(struct j2a_handle *comm) {
 	}
 }
 
-static uint8_t writeByte(struct j2a_handle *comm, uint8_t data) {
+static uint8_t writeByte(j2a_handle *comm, uint8_t data) {
 	const struct j2a_kind *kind = comm->kind;
 	if (data == A2J_SOF || data == A2J_ESC) {
 		if (kind->write(comm, A2J_ESC) != 0)
@@ -124,7 +124,7 @@ static uint8_t writeByte(struct j2a_handle *comm, uint8_t data) {
 	return 0;
 }
 
-static uint8_t readByte(struct j2a_handle *comm, uint8_t *val) {
+static uint8_t readByte(j2a_handle *comm, uint8_t *val) {
 	if (comm->kind->read(comm, val) != 0)
 		return 1;
 	if (*val == A2J_SOF)
@@ -137,7 +137,7 @@ static uint8_t readByte(struct j2a_handle *comm, uint8_t *val) {
 	return 0;
 }
 
-void j2a_packet_print(const struct j2a_packet *p) {
+void j2a_print_packet(const j2a_packet *p) {
 	printf("p->cmd=%d, p->len=%d\n", p->cmd, p->len);
 	printf("cmd=%d (0x%02x), ", p->cmd, p->cmd);
 	if(p->len > 0) {
@@ -149,11 +149,11 @@ void j2a_packet_print(const struct j2a_packet *p) {
 		printf("msg == null\n");
 }
 
-uint8_t j2a_fetch_props(struct j2a_handle *comm) {
+uint8_t j2a_fetch_props(j2a_handle *comm) {
 	if (comm->propmap != NULL)
 		return 0;
 
-	struct j2a_packet p;
+	j2a_packet p;
 	p.len = 0;
 	if (j2a_send_by_name(comm, &p, "a2jGetProperties") != 0)
 		return 1;
@@ -220,7 +220,7 @@ uint8_t j2a_fetch_props(struct j2a_handle *comm) {
 	return 0;
 }
 
-char *j2a_get_prop(struct j2a_handle *comm, const char *name) {
+char *j2a_get_prop(j2a_handle *comm, const char *name) {
 	if (j2a_fetch_props(comm) != 0)
 		return NULL;
 	for (size_t i = 0; i < comm->propcnt; i++) {
@@ -230,18 +230,18 @@ char *j2a_get_prop(struct j2a_handle *comm, const char *name) {
 	return NULL;
 }
 
-void j2a_print_propmap(struct j2a_handle *comm, FILE *stream) {
+void j2a_print_propmap(j2a_handle *comm, FILE *stream) {
 	fprintf(stream, "Properties map with %d entries:\n", comm->propcnt);
 	for (size_t i = 0; i < comm->propcnt; i++) {
 		fprintf(stream, "%s→%s\n", comm->propmap[i * 2], comm->propmap[i * 2 + 1]);
 	}
 }
 
-uint8_t j2a_fetch_funcmap(struct j2a_handle *comm) {
+uint8_t j2a_fetch_funcmap(j2a_handle *comm) {
 	if (comm->funcmap != NULL)
 		return 0;
 
-	struct j2a_packet p;
+	j2a_packet p;
 	p.cmd = 0;
 	p.len = 0;
 	if (j2a_send(comm, &p) != 0)
@@ -291,14 +291,14 @@ uint8_t j2a_fetch_funcmap(struct j2a_handle *comm) {
 	return 0;
 }
 
-void j2a_print_funcmap(struct j2a_handle *comm, FILE *stream) {
+void j2a_print_funcmap(j2a_handle *comm, FILE *stream) {
 	fprintf(stream, "Function name map with %d entries:\n", comm->funccnt);
 	for (size_t i = 0; i < comm->funccnt; i++) {
 		fprintf(stream, "%s→%zd\n", comm->funcmap[i], i);
 	}
 }
 
-static uint8_t get_funcidx(struct j2a_handle *comm, const char *name) {
+static uint8_t get_funcidx(j2a_handle *comm, const char *name) {
 	if (j2a_fetch_funcmap(comm) != 0 || name == NULL)
 		return UINT8_MAX;
 
@@ -309,7 +309,7 @@ static uint8_t get_funcidx(struct j2a_handle *comm, const char *name) {
 	return UINT8_MAX;
 }
 
-uint8_t j2a_send_by_name(struct j2a_handle *comm, struct j2a_packet *p, const char *func_name) {
+uint8_t j2a_send_by_name(j2a_handle *comm, j2a_packet *p, const char *func_name) {
 	uint8_t idx = get_funcidx(comm, func_name);
 	if (idx == UINT8_MAX)
 		return 1;
@@ -318,7 +318,7 @@ uint8_t j2a_send_by_name(struct j2a_handle *comm, struct j2a_packet *p, const ch
 	return j2a_send(comm, p);
 }
 
-uint8_t j2a_send(struct j2a_handle *comm, struct j2a_packet *p) {
+uint8_t j2a_send(j2a_handle *comm, j2a_packet *p) {
 	comm->idx = 0;
 	comm->cnt = 0;
 	uint8_t cur_seq = comm->seq;
@@ -396,4 +396,3 @@ uint8_t j2a_send(struct j2a_handle *comm, struct j2a_packet *p) {
 
 	return 0;
 }
-

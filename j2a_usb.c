@@ -107,7 +107,7 @@ out:
 		return handle;
 }
 
-void j2a_usb_disconnect(struct j2a_handle *comm) {
+void j2a_usb_disconnect(j2a_handle *comm) {
 	libusb_release_interface(comm->ctx, 0);
 	libusb_close(comm->ctx);
 }
@@ -116,7 +116,7 @@ void j2a_usb_shutdown(void) {
 	libusb_exit(NULL);
 }
 
-uint8_t j2a_usb_write(struct j2a_handle *comm, uint8_t val) {
+uint8_t j2a_usb_write(j2a_handle *comm, uint8_t val) {
 	if (comm->idx >= comm->len)
 		return 1;
 	comm->buf[comm->idx] = val;
@@ -124,7 +124,7 @@ uint8_t j2a_usb_write(struct j2a_handle *comm, uint8_t val) {
 	return 0;
 }
 
-uint8_t j2a_usb_flush(struct j2a_handle *comm) {
+uint8_t j2a_usb_flush(j2a_handle *comm) {
 	int transferred;
 	int ret = libusb_bulk_transfer(comm->ctx, A2J_USB_OUT_ADDR, comm->buf, comm->idx, &transferred, A2J_TIMEOUT * comm->len);
 	if ((ret == 0 || ret == LIBUSB_ERROR_TIMEOUT) && transferred == (int)comm->idx) {
@@ -133,7 +133,7 @@ uint8_t j2a_usb_flush(struct j2a_handle *comm) {
 		return 1;
 }
 
-uint8_t j2a_usb_read(struct j2a_handle *comm, uint8_t *val) {
+uint8_t j2a_usb_read(j2a_handle *comm, uint8_t *val) {
 	if (comm->idx >= comm->cnt) {
 		int transferred;
 		int ret = libusb_bulk_transfer(comm->ctx, A2J_USB_IN_ADDR, comm->buf, comm->len, &transferred, A2J_TIMEOUT * comm->len);
