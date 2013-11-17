@@ -3,7 +3,7 @@
 
 #include "j2a.h"
 
-void *j2a_usb_connect(const char *nth_dev);
+void *j2a_usb_connect(j2a_handle *comm, const char *nth_dev);
 void j2a_usb_disconnect(j2a_handle *comm);
 uint8_t j2a_usb_init(void);
 void j2a_usb_shutdown(void);
