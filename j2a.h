@@ -8,7 +8,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "j2a_const.h"
+#include "common/j2a_const.h"
 
 typedef struct j2a_packet {
 	uint8_t cmd;
