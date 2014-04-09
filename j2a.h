@@ -70,7 +70,7 @@ uint8_t j2a_init(void);
 j2a_handle *j2a_connect(const char *dev);
 void j2a_disconnect(j2a_handle *comm);
 void j2a_shutdown(void);
-int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new);
+int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new_handler);
 uint8_t j2a_fetch_props(j2a_handle *comm);
 char *j2a_get_prop(j2a_handle *comm, const char *name);
 void j2a_print_propmap(j2a_handle *comm, FILE *stream);

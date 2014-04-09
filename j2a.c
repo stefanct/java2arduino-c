@@ -66,7 +66,7 @@ void j2a_shutdown(void) {
 	}
 }
 
-int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new) {
+int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new_handler) {
 	static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 	if (pthread_mutex_lock(&mutex) != 0) {
 		fprintf(stderr, "%s: locking mutex failed.\n", __func__);
@@ -74,12 +74,12 @@ int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new) {
 	}
 
 	int ret = 0;
-	if (new->handle == NULL)
+	if (new_handler->handle == NULL)
 		ret = 1;
 	else {
 		j2a_sif_handler *old = comm->sif_handlers;
-		new->next = old;
-		comm->sif_handlers = new;
+		new_handler->next = old;
+		comm->sif_handlers = new_handler;
 	}
 	if (pthread_mutex_unlock(&mutex) != 0) {
 		fprintf(stderr, "%s: locking mutex failed.\n", __func__);
