@@ -1,6 +1,10 @@
 #ifndef J2A_H
 #define J2A_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -83,4 +87,9 @@ void j2a_receive(j2a_handle *comm);
 #ifndef max
 #define max(x,y) ((x) > (y) ? (x) : (y))
 #endif
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif // J2A_H
