@@ -10,13 +10,15 @@ extern "C" {
 #include <stdio.h>
 #include "common/j2a_const.h"
 
+/* Forward declare these due to circular dependencies */
+struct j2a_kind;
+struct j2a_handle;
+
 typedef struct j2a_packet {
 	uint8_t cmd;
 	uint8_t len;
 	uint8_t msg[A2J_BUFFER];
 } j2a_packet;
-
-struct j2a_handle;
 
 struct j2a_sif_packet {
 	struct j2a_handle *comm;
@@ -54,11 +56,13 @@ typedef struct j2a_handle {
 	uint8_t sendbuf[A2J_BUFFER];
 	size_t sendidx; /**< index of the first free element of sendbuf */
 	size_t sendlen; /**< number of valid elements in sendbuf */
+	pthread_mutex_t *cleanup_mutex;
 } j2a_handle;
 
 typedef struct j2a_kind {
 	uint8_t (*init)(void);
-	void *(*connect)(j2a_handle *comm, const char *dev);
+	int (*connect)(j2a_handle *comm, const char *dev);
+	int (*connect_all)(j2a_handle ***comm, int *len);
 	void (*disconnect)(j2a_handle *comm);
 	void (*shutdown)(void);
 	uint8_t (*read)(j2a_handle *comm, uint8_t *val);
@@ -68,16 +72,19 @@ typedef struct j2a_kind {
 
 uint8_t j2a_init(void);
 j2a_handle *j2a_connect(const char *dev);
+int j2a_connect_all(j2a_handle ***comm, int *len);
 void j2a_disconnect(j2a_handle *comm);
+void j2a_disconnect_all(j2a_handle ***comm, int *len);
 void j2a_shutdown(void);
 int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new_handler);
 uint8_t j2a_fetch_props(j2a_handle *comm);
 char *j2a_get_prop(j2a_handle *comm, const char *name);
-void j2a_print_propmap(j2a_handle *comm, FILE *stream);
+int j2a_print_propmap(j2a_handle *comm, FILE *stream);
 uint8_t j2a_fetch_funcmap(j2a_handle *comm);
-void j2a_print_funcmap(j2a_handle *comm, FILE *stream);
+int j2a_print_funcmap(j2a_handle *comm, FILE *stream);
 uint8_t j2a_send(j2a_handle *comm, j2a_packet *p);
 uint8_t j2a_send_by_name(j2a_handle *comm, j2a_packet *p, const char *funcName);
+uint8_t j2a_send_long_by_name(j2a_handle *comm, const char *func_name, const bool isWrite, uint8_t *buf[], uint32_t *length);
 void j2a_print_packet(const j2a_packet *p);
 void j2a_receive(j2a_handle *comm);
 

@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L /* for strdup */
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -14,6 +15,7 @@ typedef struct j2a_usb_priv {
 	pthread_mutex_t *mutex;
 	pthread_cond_t *cond;
 	enum thread_state state_rcv;
+	pthread_mutex_t *cleanup_mutex;
 } j2a_usb_priv;
 
 static bool containsUsbEndpoint(const struct libusb_interface_descriptor *if_desc, uint8_t addr) {
@@ -67,55 +69,56 @@ uint8_t j2a_usb_init(void) {
 }
 
 void j2a_usb_disconnect(j2a_handle *comm) {
-	static pthread_mutex_t help = PTHREAD_MUTEX_INITIALIZER;
-	if (pthread_mutex_trylock(&help) != 0)
-		return;
 	j2a_usb_priv *priv = comm->ctx;
-	if (priv != NULL) {
-		if (priv->mutex != NULL) {
-			if (pthread_mutex_lock(priv->mutex) != 0)
-				fprintf(stderr, "%s: locking mutex failed.\n", __func__);
-			else {
-				pthread_t *rcv = NULL;
-				if (priv->cond != NULL) {
-					if (priv->pthread_rcv != NULL) {
-						rcv = priv->pthread_rcv;
-						priv->pthread_rcv = NULL;
-						priv->state_rcv = SHUTDOWN;
-						pthread_cond_broadcast(priv->cond);
-					}
-				}
-				if (pthread_mutex_unlock(priv->mutex) != 0) {
-					fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
-				}
-				// To give potential readers a chance to unlock the mutex. They would handle the vanishing mutex fine anyway, but destroying held mutexes (and condition variables) is undefined.
-				sched_yield();
-				if (rcv != NULL) {
-					if (!pthread_equal(pthread_self(), *rcv))
-						pthread_join(*rcv, NULL);
-					free(rcv);
-				}
-				if (priv->libusb_handle != NULL) {
-					libusb_release_interface(priv->libusb_handle, 0);
-					libusb_close(priv->libusb_handle);
-					priv->libusb_handle = NULL;
-				}
-				if (priv->cond != NULL) {
-					pthread_cond_destroy(priv->cond);
-					free(priv->cond);
-					priv->cond = NULL;
+	if (priv == NULL)
+		return;
+
+	if (priv->cleanup_mutex == NULL || pthread_mutex_trylock(priv->cleanup_mutex) != 0)
+		return;
+	if (priv->mutex != NULL) {
+		if (pthread_mutex_lock(priv->mutex) != 0)
+			fprintf(stderr, "%s: locking mutex failed.\n", __func__);
+		else {
+			pthread_t *rcv = NULL;
+			if (priv->cond != NULL) {
+				if (priv->pthread_rcv != NULL) {
+					rcv = priv->pthread_rcv;
+					priv->pthread_rcv = NULL;
+					priv->state_rcv = SHUTDOWN;
+					pthread_cond_broadcast(priv->cond);
 				}
 			}
-			pthread_mutex_destroy(priv->mutex);
-			free(priv->mutex);
-			priv->mutex = NULL;
+			if (pthread_mutex_unlock(priv->mutex) != 0) {
+				fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
+			}
+			// To give potential readers a chance to unlock the mutex. They would handle the vanishing mutex fine anyway, but destroying held mutexes (and condition variables) is undefined.
+			sched_yield();
+			if (rcv != NULL) {
+				if (!pthread_equal(pthread_self(), *rcv))
+					pthread_join(*rcv, NULL);
+				free(rcv);
+			}
+			if (priv->libusb_handle != NULL) {
+				libusb_release_interface(priv->libusb_handle, 0);
+				libusb_close(priv->libusb_handle);
+				priv->libusb_handle = NULL;
+			}
+			if (priv->cond != NULL) {
+				pthread_cond_destroy(priv->cond);
+				free(priv->cond);
+				priv->cond = NULL;
+			}
 		}
-
-		free(priv);
-		comm->ctx = NULL;
+		pthread_mutex_destroy(priv->mutex);
+		free(priv->mutex);
+		priv->mutex = NULL;
 	}
-	pthread_mutex_unlock(&help);
-	pthread_mutex_destroy(&help);
+
+	pthread_mutex_t *tmp = priv->cleanup_mutex;
+	free(priv);
+	comm->ctx = NULL;
+	pthread_mutex_unlock(tmp);
+	free(tmp);
 }
 
 static void *j2a_usb_receiver_thread(void *arg) {
@@ -181,83 +184,112 @@ shutdown_threads:
 	return arg;
 }
 
-void *j2a_usb_connect(j2a_handle *comm, const char *nth_dev) {
-	int nth = 0;
-	if (nth_dev != NULL) {
-		nth = strtol(nth_dev, NULL, 10);
-		if (nth < 0)
-			return NULL;
-	}
-
-	int ret;
-	j2a_usb_priv *priv = malloc(sizeof(j2a_usb_priv));
-	if (priv == NULL) {
-		fprintf(stderr, "%s: mallocing j2a_usb_priv failed.\n", __func__);
-		return NULL;
-	}
-	memset(priv, 0, sizeof(j2a_usb_priv));
-	comm->ctx = priv;
-
-	priv->mutex = malloc(sizeof(pthread_mutex_t));
-	priv->cond = malloc(sizeof(pthread_cond_t));
-	if (priv->mutex == NULL || priv->cond == NULL) {
-		fprintf(stderr, "%s: mallocing private variables failed.\n", __func__);
-		goto bail_out;
-		return NULL;
-	}
-
-	ret = pthread_mutex_init(priv->mutex, NULL);
-	if (ret != 0) {
-		fprintf(stderr, "%s: initializing a mutex failed.\n", __func__);
-		goto bail_out;
-	}
-
-	ret = pthread_cond_init(priv->cond, NULL);
-	if (ret != 0) {
-		fprintf(stderr, "%s: initializing a condition variable failed.\n", __func__);
-		goto bail_out;
-	}
-
+static libusb_device_handle *j2a_usb_get_device(int16_t bus_num, int16_t dev_addr) {
 	libusb_device **list;
 	ssize_t cnt = libusb_get_device_list(NULL, &list);
 	if (cnt < 0)
-		goto bail_out;
+		goto cleanup;
 
 	libusb_device_handle *handle = NULL;
 	for (ssize_t i = 0; i < cnt; i++) {
 		libusb_device *dev = list[i];
-		if (isArduino(dev) && (nth-- == 0)) {
-			ret = libusb_open(dev, &handle);
+		int16_t cur_bus_num = libusb_get_bus_number(dev);
+		int16_t cur_dev_addr = libusb_get_device_address(dev);
+
+		if (bus_num >= 0) {
+			if (bus_num != cur_bus_num)
+				continue;
+		}
+
+		if (dev_addr >= 0) {
+			if (dev_addr != cur_dev_addr)
+				continue;
+		}
+
+		if (isArduino(dev)) {
+			int ret = libusb_open(dev, &handle);
 			if (ret != 0)
 				fprintf(stderr, "%s: open failed: %s\n", __func__, libusb_error_name(ret));
 			break;
 		}
 	}
 
+cleanup:
 	libusb_free_device_list(list, 1);
+	return handle;
+}
 
-	if (handle == NULL)
-		goto bail_out;
+static int j2a_usb_connect_int(j2a_handle *comm, int16_t bus_num, int16_t dev_addr) {
+	j2a_usb_priv *priv = calloc(1, sizeof(j2a_usb_priv));
+	if (priv == NULL) {
+		fprintf(stderr, "%s: mallocing j2a_usb_priv failed.\n", __func__);
+		return -1;
+	}
 
+	priv->cleanup_mutex = malloc(sizeof(pthread_mutex_t));
+	if (priv->cleanup_mutex == NULL) {
+		fprintf(stderr, "%s: mallocing the cleanup mutex failed.\n", __func__);
+		free(priv);
+		return -1;
+	}
+
+	int ret = pthread_mutex_init(priv->cleanup_mutex, NULL);
+	if (ret != 0) {
+		fprintf(stderr, "%s: initializing the cleanup mutex failed.\n", __func__);
+		free(priv->cleanup_mutex);
+		free(priv);
+		return -1;
+	}
+
+	comm->ctx = priv;
+	priv->mutex = malloc(sizeof(pthread_mutex_t));
+	priv->cond = malloc(sizeof(pthread_cond_t));
+	if (priv->mutex == NULL || priv->cond == NULL) {
+		fprintf(stderr, "%s: mallocing private variables failed.\n", __func__);
+		j2a_usb_disconnect(comm);
+		return -1;
+	}
+
+	ret = pthread_mutex_init(priv->mutex, NULL);
+	if (ret != 0) {
+		fprintf(stderr, "%s: initializing a mutex failed.\n", __func__);
+		j2a_usb_disconnect(comm);
+		return -1;
+	}
+
+	ret = pthread_cond_init(priv->cond, NULL);
+	if (ret != 0) {
+		fprintf(stderr, "%s: initializing a condition variable failed.\n", __func__);
+		j2a_usb_disconnect(comm);
+		return -1;
+	}
+
+	libusb_device_handle *handle = j2a_usb_get_device(bus_num, dev_addr);
+	if (handle == NULL) { // no compatible device found
+		j2a_usb_disconnect(comm);
+		return 1;
+	}
 
 	priv->libusb_handle = handle;
 
 	ret = libusb_claim_interface(handle, 0);
 	if (ret != 0) {
 		fprintf(stderr, "%s: claim failed: %s\n", __func__, libusb_error_name(ret));
-		goto bail_out;
+		j2a_usb_disconnect(comm);
+		return -1;
 	}
 
 	ret = pthread_mutex_lock(priv->mutex);
 	if (ret != 0) {
 		fprintf(stderr, "%s: locking mutex failed.\n", __func__);
-		goto bail_out;
+		j2a_usb_disconnect(comm);
+		return -1;
 	}
 
 	priv->pthread_rcv = malloc(sizeof(pthread_t));
 	if (priv->pthread_rcv == NULL) {
 		fprintf(stderr, "%s: mallocing receiver thread context failed.\n", __func__);
-		goto bail_out_unlock;
+		goto bailout;
 	}
 
 	priv->state_rcv = STARTUP;
@@ -268,7 +300,7 @@ void *j2a_usb_connect(j2a_handle *comm, const char *nth_dev) {
 	pthread_attr_destroy(&attr);
 	if (ret != 0) {
 		fprintf(stderr, "%s: creating receiver thread failed.\n", __func__);
-		goto bail_out_unlock;
+		goto bailout;
 	}
 
 	while (priv->state_rcv == STARTUP && ret == 0) {
@@ -276,23 +308,125 @@ void *j2a_usb_connect(j2a_handle *comm, const char *nth_dev) {
 	}
 	if (priv->state_rcv != RUN || ret != 0) {
 		fprintf(stderr, "%s: receive thread died on creation.\n", __func__);
-		goto bail_out_unlock;
+		goto bailout;
 	}
 
 	ret = pthread_mutex_unlock(priv->mutex);
 	if (ret != 0) {
 		fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
-		goto bail_out;
+		j2a_usb_disconnect(comm);
+		return -1;
 	}
 
-	return priv;
+	return 0;
 
-bail_out_unlock:
+bailout:
 	if (priv->mutex != NULL)
 		pthread_mutex_unlock(priv->mutex);
-bail_out:
-		j2a_usb_disconnect(comm);
-		return NULL;
+	j2a_usb_disconnect(comm);
+	return -1;
+}
+
+int j2a_usb_connect_all(j2a_handle ***handlesp, int *lenp) {
+	libusb_device **list;
+	ssize_t cnt = libusb_get_device_list(NULL, &list);
+	if (cnt < 0)
+		return -1;
+
+	int tmp = 0;
+	int ret = 0;
+	j2a_handle *handle = NULL;
+	j2a_handle **handles = *handlesp;
+	int len = *lenp;
+	for (ssize_t d = 0; d < cnt; d++) {
+		libusb_device *dev = list[d];
+		int16_t bus_num = libusb_get_bus_number(dev);
+		int16_t dev_addr = libusb_get_device_address(dev);
+
+		if (handle == NULL) { // reuse if previous device did not match
+			handle = malloc(sizeof(j2a_handle));
+			if (handle == NULL) {
+				ret = -1;
+				goto cleanup;
+			}
+		}
+		tmp = j2a_usb_connect_int(handle, bus_num, dev_addr);
+		if (tmp > 0)
+			continue;
+		
+		if (tmp < 0) {
+			fprintf(stderr, "Initializing handle failed.\n");
+			ret = -1;
+			goto cleanup;
+		}
+
+		// allocate the array (of pointers to structs) if there is none yet
+		if (handles == NULL) {
+			handles = malloc(sizeof(j2a_handle **));
+			if (handles == NULL) {
+				ret = -1;
+				goto cleanup;
+			}
+			*handlesp = handles;
+		}
+
+		len++;
+		// resize the array to hold len pointers
+		j2a_handle **tmphandles = realloc(handles, len * sizeof(j2a_handle *));
+		if (tmphandles == NULL) {
+			ret = -1;
+			goto cleanup;
+		}
+		handles = tmphandles;
+
+		// finally add the new handle to the array
+		handles[len - 1] = handle;
+		//*(handles + sizeof(j2a_handle *) * (len - 1)) = handle;
+		handle = NULL;
+		ret++;
+	}
+
+	*lenp = len;
+	*handlesp = handles;
+cleanup:
+	free(handle);
+	libusb_free_device_list(list, 1);
+	return ret;
+}
+
+int j2a_usb_connect(j2a_handle *comm, const char *addr) {
+	int16_t bus_num = -1;
+	int16_t dev_addr = -1;
+
+	{
+		int temp;
+		char *busptr, *endptr;
+
+		char *tmp_str = strdup(addr);
+		if (tmp_str == NULL)
+			return -1;
+
+		busptr = strtok(tmp_str, ":");
+		if (busptr != NULL)  {
+			temp = strtol(busptr, &endptr, 10);
+			if (*endptr || temp < 0 || temp > 255) {
+				fprintf(stderr, "%s: Illegal bus number: '%s'\n", __func__, busptr);
+				free(tmp_str);
+				return 1;
+			}
+			bus_num = (int16_t)temp;
+
+			temp = strtol(tmp_str, &endptr, 10);
+			if (*endptr || temp < 0 || temp > 127) {
+				fprintf(stderr, "%s: Illegal device number: '%s'\n", __func__, tmp_str);
+				free(tmp_str);
+				return 1;
+			}
+			dev_addr = (int16_t)temp;
+		}
+	}
+
+	return j2a_usb_connect_int(comm, bus_num, dev_addr);
 }
 
 void j2a_usb_shutdown(void) {

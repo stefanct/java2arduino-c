@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include <assert.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +19,7 @@ j2a_kind kinds[] = {
 	{
 		.init = j2a_usb_init,
 		.connect = j2a_usb_connect,
+		.connect_all = j2a_usb_connect_all,
 		.disconnect = j2a_usb_disconnect,
 		.shutdown = j2a_usb_shutdown,
 		.read = j2a_usb_read,
@@ -282,6 +285,113 @@ shutdown_threads:
 	return arg;
 }
 
+static int j2a_init_handle(j2a_handle *comm) {
+	comm->curseq = 0;
+
+	comm->rcvidx = 0;
+	comm->rcvlen = 0;
+	comm->sendidx = 0;
+	comm->sendlen = 0;
+
+	comm->propmap = NULL;
+	comm->propcnt = 0;
+	comm->funcmap = NULL;
+	comm->funccnt = 0;
+	comm->sif_handlers = NULL;
+	comm->rcvpacket = (j2a_packet *)-1;
+	comm->rcvmutex = malloc(sizeof(pthread_mutex_t));
+	comm->cleanup_mutex = malloc(sizeof(pthread_mutex_t));
+	comm->rcvcond = malloc(sizeof(pthread_cond_t));
+	comm->rcvthread = malloc(sizeof(pthread_t));
+	if (comm->rcvmutex == NULL || comm->cleanup_mutex == NULL || comm->rcvcond == NULL || comm->rcvthread == NULL) {
+		fprintf(stderr, "%s: mallocing private variables failed.\n", __func__);
+		return 1;
+	}
+
+	int ret = pthread_cond_init(comm->rcvcond, NULL) || pthread_mutex_init(comm->rcvmutex, NULL) || pthread_mutex_init(comm->cleanup_mutex, NULL);
+	if (ret != 0) {
+		fprintf(stderr, "%s: initializing private variables failed.\n", __func__);
+		goto bail_out;
+	}
+
+	ret = pthread_mutex_lock(comm->rcvmutex);
+	if (ret != 0) {
+		fprintf(stderr, "%s: locking mutex failed.\n", __func__);
+		goto bail_out;
+	}
+
+	comm->rcvstate = STARTUP;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	ret = pthread_create(comm->rcvthread, &attr, &j2a_receiver_thread, comm);
+	pthread_attr_destroy(&attr);
+	if (ret != 0) {
+		fprintf(stderr, "%s: creating receiver thread failed.\n", __func__);
+		goto bail_out_unlock;
+	}
+
+	while (comm->rcvstate == STARTUP && ret == 0) {
+		ret = pthread_cond_wait(comm->rcvcond, comm->rcvmutex);
+	}
+	if (comm->rcvstate != RUN || ret != 0) {
+		fprintf(stderr, "%s: receive thread did not startup correctly.\n", __func__);
+		goto bail_out_unlock;
+	}
+
+	if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
+		fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
+		return 1;
+	}
+
+	return 0;
+
+bail_out_unlock:
+	if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
+		fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
+	}
+bail_out:
+	free(comm->rcvmutex);
+	free(comm->rcvcond);
+	free(comm->rcvthread);
+	return 1;
+}
+
+void j2a_disconnect_all(j2a_handle ***comm, int *len) {
+	for (unsigned int i = 0; i < *len; i++) {
+		assert (comm != NULL && *comm != NULL && **comm != NULL);
+		j2a_disconnect((*comm)[i]);
+	}
+	free(*comm);
+	*comm = NULL;
+	*len = 0;
+}
+
+int j2a_connect_all(j2a_handle ***comm, int *len) {
+	int ret = 0;
+	int prev_len = 0;
+	for (unsigned int i = 0; i < ARRAY_SIZE(kinds); i++) {
+		int num = kinds[i].connect_all(comm, len);
+		if (num < 0) {
+			free(*comm);
+			return 1;
+		}
+
+		for (unsigned int j = 0; j < num; j++) {
+			assert (comm != NULL && *comm != NULL && **comm != NULL);
+			j2a_handle *handle = (*comm)[prev_len + j];
+			handle->kind = &kinds[i];
+			ret = j2a_init_handle(handle);
+			if (ret != 0) {
+				j2a_disconnect_all(comm, len);
+				return 1;
+			}
+		}
+		prev_len += *len;
+	}
+	return ret;
+}
+
 j2a_handle *j2a_connect(const char *dev) {
 	j2a_handle *comm = malloc(sizeof(j2a_handle));
 	if (comm == NULL)
@@ -289,78 +399,14 @@ j2a_handle *j2a_connect(const char *dev) {
 
 	unsigned int num_comms = ARRAY_SIZE(kinds);
 	for (unsigned int i = 0; i < num_comms; i++) {
-		void *ctx = kinds[i].connect(comm, dev);
-		if (ctx != NULL) {
-			comm->kind = &kinds[i];
-			comm->curseq = 0;
+		if (kinds[i].connect(comm, dev) != 0)
+			continue;
 
-			comm->rcvidx = 0;
-			comm->rcvlen = 0;
-			comm->sendidx = 0;
-			comm->sendlen = 0;
-
-			comm->propmap = NULL;
-			comm->propcnt = 0;
-			comm->funcmap = NULL;
-			comm->funccnt = 0;
-			comm->sif_handlers = NULL;
-			comm->rcvpacket = (j2a_packet *)-1;
-			comm->rcvmutex = malloc(sizeof(pthread_mutex_t));
-			comm->rcvcond = malloc(sizeof(pthread_cond_t));
-			if (comm->rcvmutex == NULL || comm->rcvcond == NULL) {
-				fprintf(stderr, "%s: mallocing private variables failed.\n", __func__);
-				goto bail_out;
-			}
-			int ret = pthread_cond_init(comm->rcvcond, NULL) || pthread_mutex_init(comm->rcvmutex, NULL);
-			if (ret != 0) {
-				fprintf(stderr, "%s: initializing private variables failed.\n", __func__);
-				goto bail_out;
-			}
-
-			ret = pthread_mutex_lock(comm->rcvmutex);
-			if (ret != 0) {
-				fprintf(stderr, "%s: locking mutex failed.\n", __func__);
-				goto bail_out;
-			}
-
-			comm->rcvthread = malloc(sizeof(pthread_t));
-			if (comm->rcvthread == NULL) {
-				fprintf(stderr, "%s: mallocing receiver thread context failed.\n", __func__);
-				goto bail_out_unlock;
-			}
-
-			comm->rcvstate = STARTUP;
-			pthread_attr_t attr;
-			pthread_attr_init(&attr);
-			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-			ret = pthread_create(comm->rcvthread, &attr, &j2a_receiver_thread, comm);
-			pthread_attr_destroy(&attr);
-			if (ret != 0) {
-				fprintf(stderr, "%s: creating receiver thread failed.\n", __func__);
-				goto bail_out_unlock;
-			}
-
-			while (comm->rcvstate == STARTUP && ret == 0) {
-				ret = pthread_cond_wait(comm->rcvcond, comm->rcvmutex);
-			}
-			if (comm->rcvstate != RUN || ret != 0) {
-				fprintf(stderr, "%s: receive thread did not startup correctly.\n", __func__);
-				goto bail_out_unlock;
-			}
-
-			if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
-				fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
-				goto bail_out;
-			}
-
-			return comm;
+		comm->kind = &kinds[i];
+		if (j2a_init_handle(comm) != 0) {
+			goto bail_out;
 		}
-	}
-	if (false) {
-bail_out_unlock:
-		if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
-			fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
-		}
+		return comm;
 	}
 bail_out:
 	free(comm);
@@ -368,56 +414,55 @@ bail_out:
 }
 
 void j2a_disconnect(j2a_handle *comm) {
-	static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-	if (pthread_mutex_trylock(&mutex) != 0) {
+	if (comm->cleanup_mutex == NULL || pthread_mutex_trylock(comm->cleanup_mutex) != 0) {
 		// great, another thread does the work already.
 		return;
 	}
-	if (comm != NULL) {
-		if (comm->kind != NULL && comm->kind->disconnect != NULL)
-				comm->kind->disconnect(comm);
-		if (comm->rcvmutex != NULL) {
-			pthread_t *rcv = NULL;
-			if (pthread_mutex_lock(comm->rcvmutex) != 0)
-				fprintf(stderr, "%s: locking mutex failed.\n", __func__);
-			else {
-				if (comm->rcvcond != NULL) {
-					if (comm->rcvthread != NULL) {
-						rcv = comm->rcvthread;
-						comm->rcvthread = NULL;
-						comm->rcvstate = SHUTDOWN;
-						pthread_cond_broadcast(comm->rcvcond);
-					}
-				}
-				if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
-					fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
-				}
-			}
-
-			if (rcv != NULL) {
-				if (!pthread_equal(pthread_self(), *rcv))
-					pthread_join(*rcv, NULL);
-				free(rcv);
-			}
-
-			pthread_mutex_destroy(comm->rcvmutex);
-			free(comm->rcvmutex);
-			comm->rcvmutex = NULL;
+	if (comm->kind != NULL && comm->kind->disconnect != NULL)
+			comm->kind->disconnect(comm);
+	if (comm->rcvmutex != NULL) {
+		pthread_t *rcv = NULL;
+		if (pthread_mutex_lock(comm->rcvmutex) != 0)
+			fprintf(stderr, "%s: locking mutex failed.\n", __func__);
+		else {
 			if (comm->rcvcond != NULL) {
-				free(comm->rcvcond);
-				comm->rcvcond = NULL;
+				if (comm->rcvthread != NULL) {
+					rcv = comm->rcvthread;
+					comm->rcvthread = NULL;
+					comm->rcvstate = SHUTDOWN;
+					pthread_cond_broadcast(comm->rcvcond);
+				}
 			}
-
+			if (pthread_mutex_unlock(comm->rcvmutex) != 0) {
+				fprintf(stderr, "%s: unlocking mutex failed.\n", __func__);
+			}
 		}
-		if (comm->funcmap != NULL)
-			free_funcmap(comm);
-		if (comm->propmap != NULL)
-			free_propmap(comm);
 
-		free(comm);
+		if (rcv != NULL) {
+			if (!pthread_equal(pthread_self(), *rcv))
+				pthread_join(*rcv, NULL);
+			free(rcv);
+		}
+
+		pthread_mutex_destroy(comm->rcvmutex);
+		free(comm->rcvmutex);
+		comm->rcvmutex = NULL;
+		if (comm->rcvcond != NULL) {
+			free(comm->rcvcond);
+			comm->rcvcond = NULL;
+		}
+
 	}
-	pthread_mutex_unlock(&mutex);
-	pthread_mutex_destroy(&mutex);
+	if (comm->funcmap != NULL)
+		free_funcmap(comm);
+	if (comm->propmap != NULL)
+		free_propmap(comm);
+
+	pthread_mutex_t *tmp = comm->cleanup_mutex;
+	free(comm);
+	pthread_mutex_unlock(tmp);
+	pthread_mutex_destroy(tmp);
+	free(tmp);
 }
 
 static uint8_t writeByte(j2a_handle *comm, uint8_t data) {
@@ -449,26 +494,46 @@ void j2a_print_packet(const j2a_packet *p) {
 		printf("msg == null\n");
 }
 
+void j2a_print_manypacket(const j2a_packet *p) {
+	uint32_t* tmp = (uint32_t*)(&p->msg[2]);
+	uint32_t off = *tmp;
+	printf("cmd=%d (0x%02x), a2jMany cmd=%d (0x%02x)\n", p->cmd, p->cmd, p->msg[0], p->msg[0]);
+	printf("isLast=%d, isWrite=%d, a2jMany len=%"PRId8", a2jMany offset=0x%08"PRIx32"\n",
+		p->msg[1] & A2J_MANY_ISLAST_MASK, p->msg[1] & A2J_MANY_ISWRITE_MASK, p->len - A2J_MANY_HEADER, off);
+	if(p->len > A2J_MANY_HEADER) {
+		for(unsigned int i = 0; i < (p->len - A2J_MANY_HEADER); i++) {
+			printf("a2jMany[%d]=0x%02x", off + i, p->msg[A2J_MANY_HEADER + i]);
+			if (isprint(p->msg[A2J_MANY_HEADER + i]))
+				printf(" (%c)\n", p->msg[A2J_MANY_HEADER + i]);
+			else
+				printf("\n");
+		}
+	} else
+		printf("a2jMany payload == null\n");
+}
+
 uint8_t j2a_fetch_props(j2a_handle *comm) {
 	if (comm->propmap != NULL)
 		return 0;
 
-	j2a_packet p;
-	p.len = 0;
-	if (j2a_send_by_name(comm, &p, "a2jGetProperties") != 0)
+	char *buf = NULL;
+	uint32_t buf_len = 0;
+	uint8_t ret = j2a_send_long_by_name(comm, "a2jGetProperties", false, (uint8_t **)&buf, &buf_len);
+	if (ret != 0) {
+		free(buf);
 		return 1;
+	}
 
-	char *ptr = (char *)p.msg;
-	size_t todo = p.len;
+	char *ptr = buf;
+	size_t todo = buf_len;
 	char *first = NULL;
-	while (ptr < (char *)(p.msg + p.len)) {
+	ret = 1;
+	while (ptr < (buf + buf_len)) {
 		size_t curlen = strnlen(ptr, todo);
 
 		if (curlen > 0) {
 			if (comm->propcnt == UINT8_MAX) {
-				free(first);
-				free_propmap(comm);
-				return 1;
+				goto bailout;
 			}
 			/* This would be valid but let's be forgiving:
 			 * the last string does not need to be null-terminated,
@@ -476,13 +541,11 @@ uint8_t j2a_fetch_props(j2a_handle *comm) {
 			if (curlen == todo) {
 				free(first);
 				free_propmap(comm);
-				return 1;
+				goto bailout;
 			} */
 			char *curstr = malloc(curlen + 1);
 			if (curstr == NULL) {
-				free(first);
-				free_propmap(comm);
-				return 1;
+				goto bailout;
 			}
 
 			strncpy(curstr, ptr, curlen);
@@ -493,10 +556,8 @@ uint8_t j2a_fetch_props(j2a_handle *comm) {
 			} else {
 				char **tmp = realloc(comm->propmap, sizeof(char *) * (comm->propcnt * 2 + 2));
 				if (tmp == NULL) {
-					free(first);
 					free(curstr);
-					free_propmap(comm);
-					return 1;
+					goto bailout;
 				}
 				comm->propmap = tmp;
 
@@ -510,14 +571,20 @@ uint8_t j2a_fetch_props(j2a_handle *comm) {
 		ptr += curlen;
 		todo -= curlen;
 	}
+	ret = 0;
 
+bailout:
 	if (first != NULL) { // key without value
 		free(first);
-		free_propmap(comm);
-		return 1;
+		ret = 1;
 	}
 
-	return 0;
+	if (ret != 0) {
+		free_propmap(comm);
+	}
+	free(buf);
+
+	return ret;
 }
 
 char *j2a_get_prop(j2a_handle *comm, const char *name) {
@@ -530,7 +597,9 @@ char *j2a_get_prop(j2a_handle *comm, const char *name) {
 	return NULL;
 }
 
-void j2a_print_propmap(j2a_handle *comm, FILE *stream) {
+int j2a_print_propmap(j2a_handle *comm, FILE *stream) {
+	if (j2a_fetch_props(comm) != 0)
+		return -1;
 	fprintf(stream, "Properties map with %d entries:\n", comm->propcnt);
 	for (size_t i = 0; i < comm->propcnt; i++) {
 		fprintf(stream, "%s→%s\n", comm->propmap[i * 2], comm->propmap[i * 2 + 1]);
@@ -591,7 +660,9 @@ uint8_t j2a_fetch_funcmap(j2a_handle *comm) {
 	return 0;
 }
 
-void j2a_print_funcmap(j2a_handle *comm, FILE *stream) {
+int j2a_print_funcmap(j2a_handle *comm, FILE *stream) {
+	if (j2a_fetch_funcmap(comm) != 0)
+		return -1;
 	fprintf(stream, "Function name map with %d entries:\n", comm->funccnt);
 	for (size_t i = 0; i < comm->funccnt; i++) {
 		fprintf(stream, "%s→%zd\n", comm->funcmap[i], i);
@@ -607,6 +678,89 @@ static uint8_t get_funcidx(j2a_handle *comm, const char *name) {
 			return i;
 	}
 	return UINT8_MAX;
+}
+
+uint8_t j2a_send_long_by_name(j2a_handle *comm, const char *func_name, const bool isWrite, uint8_t *buf[], uint32_t *length) {
+	if (isWrite && *length > 0 && *buf == NULL)
+		return 1;
+
+	uint8_t idx = get_funcidx(comm, func_name);
+	if (idx == UINT8_MAX)
+		return 1;
+
+	uint32_t sendOff = 0;
+	uint32_t rcvOff = 0;
+	bool sendLast = false;
+	uint32_t todo = *length;
+	#define ALLOC_CHUNK (4 * A2J_MANY_PAYLOAD)
+	uint8_t *replies = calloc(ALLOC_CHUNK, sizeof(uint8_t));
+	uint32_t replies_cnt = ALLOC_CHUNK;
+	if (replies == NULL)
+		return -1;
+
+	uint8_t ret = 1;
+	while (true) {
+		uint8_t curLen;
+		j2a_packet p;
+		if (!isWrite) {
+			curLen = 0;
+		} else if (todo <= A2J_MANY_PAYLOAD) {
+			sendLast = true;
+			curLen = todo;
+		} else {
+			curLen = A2J_MANY_PAYLOAD;
+		}
+
+		p.len = A2J_MANY_HEADER + curLen;
+		p.msg[0] = idx;
+		p.msg[1] = isWrite << A2J_MANY_ISWRITE_BIT | sendLast << A2J_MANY_ISLAST_BIT;
+		uint32_t* tmp = (uint32_t*)(&p.msg[2]);
+		tmp[0] = sendOff;
+		if (isWrite)
+			memcpy(p.msg + A2J_MANY_HEADER, *buf + sendOff, curLen);
+
+		ret = j2a_send_by_name(comm, &p, "a2jMany") || p.msg[0];
+		if (ret != 0)
+			break;
+
+		if (isWrite) {
+			sendOff += curLen;
+		} else {
+			curLen = p.len - A2J_MANY_HEADER;
+			if (*tmp != sendOff || curLen == 0) {
+				ret = 1;
+				break;
+			}
+			rcvOff = sendOff;
+			sendOff += curLen;
+		}
+		todo -= curLen;
+
+		if (replies_cnt < rcvOff + curLen) {
+			replies_cnt += ALLOC_CHUNK;
+			uint8_t *tmp_replies = realloc(replies, replies_cnt);
+			if (tmp_replies == NULL) {
+				ret = 1;
+				break;
+			}
+			replies = tmp_replies;
+		}
+		memcpy(replies + rcvOff, p.msg + A2J_MANY_HEADER, curLen);
+		rcvOff += curLen;
+		if (sendLast || (p.msg[1] & A2J_MANY_ISLAST_MASK)) {
+			ret = p.msg[0];
+			*length = rcvOff + curLen;
+			break;
+		}
+	}
+	if (ret != 0) {
+		free(replies);
+	} else {
+		if (isWrite)
+			free(*buf);
+		*buf = replies;
+	}
+	return ret;
 }
 
 uint8_t j2a_send_by_name(j2a_handle *comm, j2a_packet *p, const char *func_name) {
