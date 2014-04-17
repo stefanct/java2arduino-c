@@ -105,8 +105,10 @@ static void *handle_sif_packet(void *arg) {
 	j2a_handle *comm = sif->comm;
 	j2a_sif_handler *h = comm->sif_handlers;
 	while (h != NULL) {
-		if (sif->p.cmd == h->cmd)
+		if (sif->p.cmd == h->cmd) {
+			sif->user_data = h->user_data;
 			h->handle(sif);
+		}
 		h = h->next;
 	}
 	free(sif);

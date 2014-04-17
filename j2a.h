@@ -24,12 +24,14 @@ struct j2a_sif_packet {
 	struct j2a_handle *comm;
 	j2a_packet p;
 	uint8_t seq;
+	void *user_data;
 };
 
 typedef struct j2a_sif_handler {
 	uint8_t cmd;
 	void (*handle)(struct j2a_sif_packet *sif);
 	struct j2a_sif_handler *next;
+	void *user_data;
 } j2a_sif_handler;
 
 enum thread_state {ERROR, STARTUP, RUN, SHUTDOWN};
