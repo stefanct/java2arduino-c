@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -15,6 +16,14 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
+void j2a_debug(const char *fmt, ...) {
+#ifndef NDEBUG
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+#endif // NDEBUG
+}
 j2a_kind kinds[] = {
 	{
 		.init = j2a_usb_init,
