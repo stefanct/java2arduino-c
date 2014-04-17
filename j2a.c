@@ -479,12 +479,16 @@ static uint8_t writeByte(j2a_handle *comm, uint8_t data) {
 	return 0;
 }
 
-void j2a_print_packet(const j2a_packet *p) {
+void j2a_print_packet_checksum(const j2a_packet *p, uint8_t seq, uint16_t rcv) {
+	uint8_t csum = (uint8_t)(seq ^ (p->cmd + A2J_CRC_CMD) ^ (p->len + A2J_CRC_LEN));
+	if (rcv < 256)
+		printf("seq=%d (0x%02x), ", seq, seq);
 	printf("cmd=%d (0x%02x), ", p->cmd, p->cmd);
 	if(p->len > 0) {
 		printf("p->len=%d\n", p->len);
 		for(unsigned int i = 0; i < p->len; i++) {
 			printf("msg[%d]=0x%02x", i, p->msg[i]);
+			csum ^= p->msg[i];
 			if (isprint(p->msg[i]))
 				printf(" (%c)\n", p->msg[i]);
 			else
@@ -492,6 +496,12 @@ void j2a_print_packet(const j2a_packet *p) {
 		}
 	} else
 		printf("msg == null\n");
+	if (rcv < 256)
+		printf("checksum %s(rcv 0x%02x, calc 0x%02x)\n", rcv != csum ? "MISMATCH " : "", rcv, csum);
+}
+
+void j2a_print_packet(const j2a_packet *p) {
+	j2a_print_packet_checksum(p, -1, -1);
 }
 
 void j2a_print_manypacket(const j2a_packet *p) {

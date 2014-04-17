@@ -86,6 +86,7 @@ uint8_t j2a_send(j2a_handle *comm, j2a_packet *p);
 uint8_t j2a_send_by_name(j2a_handle *comm, j2a_packet *p, const char *funcName);
 uint8_t j2a_send_long_by_name(j2a_handle *comm, const char *func_name, const bool isWrite, uint8_t *buf[], uint32_t *length);
 void j2a_print_packet(const j2a_packet *p);
+void j2a_print_packet_checksum(const j2a_packet *p, uint8_t seq, uint16_t rcved_csum);
 void j2a_receive(j2a_handle *comm);
 
 #ifndef min
