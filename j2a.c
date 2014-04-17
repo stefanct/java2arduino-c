@@ -111,7 +111,7 @@ static uint8_t read_byte(j2a_handle *comm, uint8_t *val) {
 		if (comm->kind->read(comm, val) != 0)
 			return 1;
 		*val += 1;
-	} else if (*val == A2J_SOF || *val == A2J_SOS || *val == A2J_ESC) {
+	} else if (*val == A2J_SOF || *val == A2J_SOS) {
 		fprintf(stderr, "%s: Unescaped special character inside frame: 0x%02x.\n", __func__, *val);
 		return 1;
 	}
@@ -358,7 +358,7 @@ bail_out:
 }
 
 void j2a_disconnect_all(j2a_handle ***comm, int *len) {
-	for (unsigned int i = 0; i < *len; i++) {
+	for (unsigned int i = 0; i < (unsigned int)*len; i++) {
 		assert (comm != NULL && *comm != NULL && **comm != NULL);
 		j2a_disconnect((*comm)[i]);
 	}
@@ -368,28 +368,27 @@ void j2a_disconnect_all(j2a_handle ***comm, int *len) {
 }
 
 int j2a_connect_all(j2a_handle ***comm, int *len) {
-	int ret = 0;
 	int prev_len = 0;
 	for (unsigned int i = 0; i < ARRAY_SIZE(kinds); i++) {
 		int num = kinds[i].connect_all(comm, len);
 		if (num < 0) {
 			free(*comm);
-			return 1;
+			return num;
 		}
 
-		for (unsigned int j = 0; j < num; j++) {
+		for (unsigned int j = 0; j < (unsigned int)num; j++) {
 			assert (comm != NULL && *comm != NULL && **comm != NULL);
 			j2a_handle *handle = (*comm)[prev_len + j];
 			handle->kind = &kinds[i];
-			ret = j2a_init_handle(handle);
+			int ret = j2a_init_handle(handle);
 			if (ret != 0) {
 				j2a_disconnect_all(comm, len);
-				return 1;
+				return -1;
 			}
 		}
 		prev_len += *len;
 	}
-	return ret;
+	return 0;
 }
 
 j2a_handle *j2a_connect(const char *dev) {
@@ -511,7 +510,7 @@ void j2a_print_manypacket(const j2a_packet *p) {
 	printf("isLast=%d, isWrite=%d, a2jMany len=%"PRId8", a2jMany offset=0x%08"PRIx32"\n",
 		p->msg[1] & A2J_MANY_ISLAST_MASK, p->msg[1] & A2J_MANY_ISWRITE_MASK, p->len - A2J_MANY_HEADER, off);
 	if(p->len > A2J_MANY_HEADER) {
-		for(unsigned int i = 0; i < (p->len - A2J_MANY_HEADER); i++) {
+		for(unsigned int i = 0; i < (unsigned int)(p->len - A2J_MANY_HEADER); i++) {
 			printf("a2jMany[%d]=0x%02x", off + i, p->msg[A2J_MANY_HEADER + i]);
 			if (isprint(p->msg[A2J_MANY_HEADER + i]))
 				printf(" (%c)\n", p->msg[A2J_MANY_HEADER + i]);
@@ -614,6 +613,7 @@ int j2a_print_propmap(j2a_handle *comm, FILE *stream) {
 	for (size_t i = 0; i < comm->propcnt; i++) {
 		fprintf(stream, "%s→%s\n", comm->propmap[i * 2], comm->propmap[i * 2 + 1]);
 	}
+	return 0;
 }
 
 uint8_t j2a_fetch_funcmap(j2a_handle *comm) {
@@ -677,6 +677,7 @@ int j2a_print_funcmap(j2a_handle *comm, FILE *stream) {
 	for (size_t i = 0; i < comm->funccnt; i++) {
 		fprintf(stream, "%s→%zd\n", comm->funcmap[i], i);
 	}
+	return 0;
 }
 
 static uint8_t get_funcidx(j2a_handle *comm, const char *name) {
