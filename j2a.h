@@ -8,6 +8,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <pthread.h>
 #include "common/j2a_const.h"
 
 /* Forward declare these due to circular dependencies */
