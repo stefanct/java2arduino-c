@@ -8,7 +8,7 @@ extern "C" {
 #include "j2a.h"
 
 int j2a_usb_connect(j2a_handle *comm, const char *addr);
-int j2a_usb_connect_all(j2a_handle ***comm, int *len);
+int j2a_usb_connect_all(j2a_handle ***comm, unsigned int *len);
 void j2a_usb_disconnect(j2a_handle *comm);
 uint8_t j2a_usb_init(void);
 void j2a_usb_shutdown(void);

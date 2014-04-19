@@ -64,7 +64,7 @@ typedef struct j2a_handle {
 typedef struct j2a_kind {
 	uint8_t (*init)(void);
 	int (*connect)(j2a_handle *comm, const char *dev);
-	int (*connect_all)(j2a_handle ***comm, int *len);
+	int (*connect_all)(j2a_handle ***comm, unsigned int *len);
 	void (*disconnect)(j2a_handle *comm);
 	void (*shutdown)(void);
 	uint8_t (*read)(j2a_handle *comm, uint8_t *val);
@@ -74,9 +74,9 @@ typedef struct j2a_kind {
 
 uint8_t j2a_init(void);
 j2a_handle *j2a_connect(const char *dev);
-int j2a_connect_all(j2a_handle ***comm, int *len);
+int j2a_connect_all(j2a_handle ***comm, unsigned int *len);
 void j2a_disconnect(j2a_handle *comm);
-void j2a_disconnect_all(j2a_handle ***comm, int *len);
+void j2a_disconnect_all(j2a_handle ***comm, unsigned int *len);
 void j2a_shutdown(void);
 int j2a_add_sif_handler(j2a_handle *comm, j2a_sif_handler *new_handler);
 uint8_t j2a_fetch_props(j2a_handle *comm);

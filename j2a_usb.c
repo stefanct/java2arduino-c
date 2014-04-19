@@ -327,7 +327,7 @@ bailout:
 	return -1;
 }
 
-int j2a_usb_connect_all(j2a_handle ***handlesp, int *lenp) {
+int j2a_usb_connect_all(j2a_handle ***handlesp, unsigned int *lenp) {
 	libusb_device **list;
 	ssize_t cnt = libusb_get_device_list(NULL, &list);
 	if (cnt < 0)
@@ -337,7 +337,7 @@ int j2a_usb_connect_all(j2a_handle ***handlesp, int *lenp) {
 	int ret = 0;
 	j2a_handle *handle = NULL;
 	j2a_handle **handles = *handlesp;
-	int len = *lenp;
+	unsigned int len = *lenp;
 	for (ssize_t d = 0; d < cnt; d++) {
 		libusb_device *dev = list[d];
 		int16_t bus_num = libusb_get_bus_number(dev);
@@ -381,7 +381,6 @@ int j2a_usb_connect_all(j2a_handle ***handlesp, int *lenp) {
 
 		// finally add the new handle to the array
 		handles[len - 1] = handle;
-		//*(handles + sizeof(j2a_handle *) * (len - 1)) = handle;
 		handle = NULL;
 		ret++;
 	}

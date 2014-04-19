@@ -368,7 +368,7 @@ bail_out:
 	return 1;
 }
 
-void j2a_disconnect_all(j2a_handle ***comm, int *len) {
+void j2a_disconnect_all(j2a_handle ***comm, unsigned int *len) {
 	for (unsigned int i = 0; i < (unsigned int)*len; i++) {
 		assert (comm != NULL && *comm != NULL && **comm != NULL);
 		j2a_disconnect((*comm)[i]);
@@ -378,7 +378,7 @@ void j2a_disconnect_all(j2a_handle ***comm, int *len) {
 	*len = 0;
 }
 
-int j2a_connect_all(j2a_handle ***comm, int *len) {
+int j2a_connect_all(j2a_handle ***comm, unsigned int *len) {
 	int prev_len = 0;
 	for (unsigned int i = 0; i < ARRAY_SIZE(kinds); i++) {
 		int num = kinds[i].connect_all(comm, len);
